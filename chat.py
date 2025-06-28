@@ -11,10 +11,13 @@ from config import (
 )
 
 class Chat:
-    """Manages a chat session with topic gathering and Feynman tutoring phases."""
+    """
+    Manages a chat session with topic gathering and Feynman tutoring phases.
+    """
     
     def __init__(self) -> None:
-        """Initialize the chat session.
+        """
+        Initialize the chat session.
         
         Raises:
             ValueError: If GEMINI_API_KEY is not found in environment variables.
@@ -23,26 +26,30 @@ class Chat:
             raise ValueError("GEMINI_API_KEY not found in environment variables")
         
         genai.configure(api_key=GEMINI_API_KEY)
-        self.topic_gathering_model = genai.GenerativeModel(
-            model_name=MODEL_NAME,
-            system_instruction=TOPIC_GATHERING_SYSTEM_INSTRUCTIONS
-        )
+        self.topic_gathering_model = genai.GenerativeModel(model_name=MODEL_NAME)
         self.topic_chat = None
         self.feynman_chat = None
         self.chosen_topic = None
         self.current_phase = "topic_gathering"
         
     def start_topic_gathering(self) -> str:
-        """Start the topic gathering phase and return initial message.
+        """
+        Start the topic gathering phase and return initial message.
         
         Returns:
             str: The initial greeting message for topic gathering.
         """
-        self.topic_chat = self.topic_gathering_model.start_chat(history=[])
+        # Create chat with system instructions as the first message
+        system_message = {
+            "role": "user",
+            "parts": [TOPIC_GATHERING_SYSTEM_INSTRUCTIONS]
+        }
+        self.topic_chat = self.topic_gathering_model.start_chat(history=[system_message])
         return "Hello! I'm here to help you learn. What topic or concept are you curious about today?"
     
     def process_topic_message(self, user_input: str) -> Dict[str, Any]:
-        """Process a message during the topic gathering phase.
+        """
+        Process a message during the topic gathering phase.
         
         Args:
             user_input (str): The user's message to process.
@@ -97,11 +104,16 @@ class Chat:
         
         # Generate topic-specific system instructions for Feynman technique
         feynman_system_instructions = get_feynman_system_instructions(self.chosen_topic)
-        feynman_model = genai.GenerativeModel(
-            model_name=MODEL_NAME,
-            system_instruction=feynman_system_instructions
-        )
-        self.feynman_chat = feynman_model.start_chat(history=[])
+        
+        # Create a new model instance for Feynman tutoring
+        feynman_model = genai.GenerativeModel(model_name=MODEL_NAME)
+        
+        # Create chat with system instructions as the first message
+        system_message = {
+            "role": "user",
+            "parts": [feynman_system_instructions]
+        }
+        self.feynman_chat = feynman_model.start_chat(history=[system_message])
         
         # Send initial prompt to start the Feynman explanation
         first_prompt = f"Please begin explaining {self.chosen_topic} using the Feynman technique."
@@ -126,6 +138,7 @@ class Chat:
         if not self.feynman_chat:
             raise RuntimeError("Feynman tutoring chat not initialized")
         
+        # TODO: replace with better means of termination
         # Check for session termination commands
         if user_input.lower() in ["quit", "exit", "stop"]:
             return {
@@ -143,34 +156,45 @@ class Chat:
     def _extract_topic_from_response(self, response_text: str) -> Optional[str]:
         """Extract the identified topic from the AI's response.
         
-        This method uses pattern matching to identify when the AI has confirmed
-        a topic. It looks for phrases like "topic is" or "chosen topic is"
-        and extracts the topic name that follows.
+        This is a simple heuristic that looks for topic confirmation patterns
+        in the AI's response. In a production system, you might want to use
+        more sophisticated NLP techniques or structured output.
         
         Args:
             response_text (str): The AI's response text to analyze.
             
         Returns:
-            Optional[str]: The extracted topic name, or None if no topic found.
+            Optional[str]: The identified topic if found, None otherwise.
         """
+        # Simple heuristic: look for patterns that suggest topic identification
         response_lower = response_text.lower()
         
-        # Look for topic confirmation patterns in the AI's response
-        if "topic is" in response_lower or "chosen topic is" in response_lower:
-            try:
-                # Split on "topic is" and take the part after it
-                parts = response_lower.split("topic is")
-                if len(parts) > 1:
-                    topic_text = parts[1].strip()
-                    # Remove common concluding phrases that might follow the topic
-                    if "!" in topic_text: 
-                        topic_text = topic_text.split("!")[0]
-                    if "." in topic_text: 
-                        topic_text = topic_text.split(".")[0]
-                    return topic_text.strip()
-            except Exception:
-                # If extraction fails, return None to continue gathering
-                pass
+        # Look for confirmation patterns
+        confirmation_phrases = [
+            "so you want to learn about",
+            "your chosen topic is",
+            "you're interested in",
+            "let's explore",
+            "great! so your topic is"
+        ]
+        
+        for phrase in confirmation_phrases:
+            if phrase in response_lower:
+                # Extract the topic that follows the confirmation phrase
+                start_idx = response_lower.find(phrase) + len(phrase)
+                # Find the end of the topic (period, exclamation, or newline)
+                end_chars = ['.', '!', '?', '\n']
+                end_idx = len(response_text)
+                for char in end_chars:
+                    char_idx = response_text.find(char, start_idx)
+                    if char_idx != -1 and char_idx < end_idx:
+                        end_idx = char_idx
+                
+                topic = response_text[start_idx:end_idx].strip()
+                # Clean up common punctuation and formatting
+                topic = topic.strip('*').strip('"').strip("'").strip()
+                if topic:
+                    return topic
         
         return None
     

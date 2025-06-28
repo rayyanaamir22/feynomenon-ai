@@ -3,9 +3,8 @@ Command-line interface for Feynomenon AI chat.
 """
 from chat import Chat
 import sys
-from typing import NoReturn
 
-def main() -> NoReturn:
+def main() -> None:
     """Run the chat interface in command-line mode.
     
     This function handles the complete chat flow including:
